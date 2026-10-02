@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CP4 Financeiro — WhatsApp (protótipo)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="logo-white.png" alt="CP4">
+      <div>
+        <strong>CP4 Financeiro</strong>
+        <span>Atendimento via WhatsApp · protótipo com dados fictícios</span>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-view="cliente" aria-selected="true">Cliente · WhatsApp</button>
+      <button role="tab" data-view="central" aria-selected="false">Central Financeira <span class="pill" id="tab-fila" hidden></span></button>
+      <button role="tab" data-view="config" aria-selected="false">Configurações</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- VISÃO 1: CLIENTE -->
+    <section id="v-cliente" class="view">
+      <div class="cliente-grid">
+        <div class="phone-col">
+          <div class="phone">
+            <div class="wa-head">
+              <div class="wa-avatar">CP4</div>
+              <div class="wa-title">
+                <strong>CP4 Financeiro <span class="wa-check" title="Conta comercial verificada">✓</span></strong>
+                <span id="wa-status">conta comercial</span>
+              </div>
+            </div>
+            <div class="wa-body" id="chat" aria-live="polite"></div>
+            <form class="wa-input" id="wa-form" autocomplete="off">
+              <input id="wa-text" type="text" placeholder="Mensagem" aria-label="Mensagem">
+              <button type="submit" aria-label="Enviar">➤</button>
+            </form>
+          </div>
+        </div>
+
+        <aside class="side">
+          <section class="card">
+            <h2>Frases para demonstrar</h2>
+            <p class="muted small">Clique para enviar, ou escreva livremente no telefone.</p>
+            <div class="chips" id="frases"></div>
+          </section>
+
+          <section class="card">
+            <h2>Cenário</h2>
+            <div class="scn">
+              <label>Nível do contato
+                <select id="sim-nivel">
+                  <option value="1">Consulta</option>
+                  <option value="2">Financeiro</option>
+                  <option value="3" selected>Aprovador</option>
+                </select>
+              </label>
+              <label class="chk"><input type="checkbox" id="sim-multi"> Contato vinculado a 2 transportadoras</label>
+              <label class="chk"><input type="checkbox" id="sim-desconhecido"> Número não cadastrado</label>
+              <label class="chk"><input type="checkbox" id="sim-api"> API financeira fora do ar</label>
+              <label class="chk"><input type="checkbox" id="sim-pdf"> Falha ao gerar PDF</label>
+              <label class="chk"><input type="checkbox" id="sim-horario"> Fora do horário de atendimento humano</label>
+            </div>
+            <div class="row">
+              <button class="btn ghost" id="btn-expirar">Expirar sessão</button>
+              <button class="btn ghost" id="btn-reset">Reiniciar conversa</button>
+            </div>
+            <p class="muted small">PIN financeiro de demonstração: <span class="mono" id="pin-demo"></span></p>
+            <div id="pendente"></div>
+          </section>
+
+          <section class="card">
+            <h2>Bastidores da última mensagem</h2>
+            <ol class="pipe" id="pipe"></ol>
+          </section>
+
+          <section class="card">
+            <h2>Trilha de auditoria</h2>
+            <div class="tablewrap">
+              <table class="tbl" id="audit">
+                <thead><tr><th>Hora</th><th>Intent</th><th>Auth</th><th>Decisão</th><th>API</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <!-- VISÃO 2: CENTRAL -->
+    <section id="v-central" class="view" hidden>
+      <div id="central-lista">
+        <div class="pagehead">
+          <h1>CP4 Financeiro — Atendimento</h1>
+          <span class="muted">Hoje, 02/10/2026</span>
+        </div>
+        <div class="kpis" id="kpis"></div>
+        <div class="card flush">
+          <div class="cardhead">
+            <h2>Conversas</h2>
+            <div class="filters" id="filtros"></div>
+          </div>
+          <div class="tablewrap">
+            <table class="tbl hover" id="convs">
+              <thead><tr>
+                <th>Transportadora</th><th>Contato</th><th>Telefone</th><th>Última mensagem</th><th>Intent</th><th>Status</th><th>Risco</th><th>Humano</th><th>Horário</th><th></th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div id="central-detalhe" hidden></div>
+    </section>
+
+    <!-- VISÃO 3: CONFIGURAÇÕES -->
+    <section id="v-config" class="view" hidden>
+      <div class="pagehead">
+        <h1>Configurações <span class="crumb">→ Financeiro → WhatsApp</span></h1>
+        <button class="btn primary" id="btn-salvar">Salvar alterações</button>
+      </div>
+      <div class="cfg" id="cfg"></div>
+    </section>
+  </main>
+
+  <!-- Confirmação dentro da plataforma (simulada) -->
+  <div class="overlay" id="modal" hidden>
+    <div class="browser" role="dialog" aria-modal="true" aria-labelledby="modal-h">
+      <div class="urlbar"><span class="lock">🔒</span><span id="modal-url"></span><button class="x" id="modal-x" aria-label="Fechar">×</button></div>
+      <div class="browser-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
