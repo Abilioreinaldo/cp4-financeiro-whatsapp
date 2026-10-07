@@ -15,7 +15,7 @@
       <img src="logo-white.png" alt="CP4">
       <div>
         <strong>CP4 Financeiro</strong>
-        <span>Atendimento via WhatsApp · protótipo com dados fictícios</span>
+        <span>Atendimento via WhatsApp · somente consulta · protótipo com dados fictícios</span>
       </div>
     </div>
     <nav class="tabs" role="tablist">
@@ -59,8 +59,7 @@
               <label>Nível do contato
                 <select id="sim-nivel">
                   <option value="1">Consulta</option>
-                  <option value="2">Financeiro</option>
-                  <option value="3" selected>Aprovador</option>
+                  <option value="2" selected>Financeiro</option>
                 </select>
               </label>
               <label class="chk"><input type="checkbox" id="sim-multi"> Contato vinculado a 2 transportadoras</label>
@@ -130,14 +129,6 @@
       <div class="cfg" id="cfg"></div>
     </section>
   </main>
-
-  <!-- Confirmação dentro da plataforma (simulada) -->
-  <div class="overlay" id="modal" hidden>
-    <div class="browser" role="dialog" aria-modal="true" aria-labelledby="modal-h">
-      <div class="urlbar"><span class="lock">🔒</span><span id="modal-url"></span><button class="x" id="modal-x" aria-label="Fechar">×</button></div>
-      <div class="browser-body" id="modal-body"></div>
-    </div>
-  </div>
 
   <div class="toast" id="toast" hidden></div>
 

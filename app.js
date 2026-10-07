@@ -14,7 +14,8 @@
   const rid = (p) => p + Math.random().toString(36).slice(2, 10).toUpperCase();
 
   const BASE = JSON.stringify(DATA.empresas);
-  const NIVEIS = { 0: '—', 1: 'Consulta', 2: 'Financeiro', 3: 'Aprovador' };
+  // Canal somente consulta: os níveis só recortam o que cada contato pode ver.
+  const NIVEIS = { 0: '—', 1: 'Consulta', 2: 'Financeiro' };
 
   // ---------------------------------------------------------------- catálogo de intents
   // risk: classe de risco · level: nível mínimo do contato · auth: nível de autenticação exigido
@@ -24,19 +25,21 @@
     'account.projection.get': { risk: 'R1', level: 1, auth: 'A1' },
     'cycle.open.get': { risk: 'R1', level: 1, auth: 'A1' },
     'cycle.open.entries': { risk: 'R2', level: 2, auth: 'A2' },
-    'cycle.close.request': { risk: 'R3', level: 2, auth: 'A3' },
+    'cycle.close.request': { risk: 'R1', level: 1, auth: 'A1' }, // informa o ciclo e transfere; não fecha nada
     'invoice.list': { risk: 'R1', level: 1, auth: 'A1' },
     'invoice.status.get': { risk: 'R1', level: 1, auth: 'A1' },
     'invoice.due.get': { risk: 'R1', level: 1, auth: 'A1' },
     'invoice.document.send': { risk: 'R2', level: 2, auth: 'A2' },
-    'invoice.payment.send': { risk: 'R2', level: 2, auth: 'A2' },
+    'invoice.payment.send': { risk: 'R1', level: 1, auth: 'A1' }, // não há boleto: só orienta para o PDF da fatura
     'invoice.overdue.list': { risk: 'R1', level: 1, auth: 'A1' },
     'statement.get': { risk: 'R2', level: 1, auth: 'A2' },
     'statement.document.send': { risk: 'R2', level: 2, auth: 'A2' },
     'fuel.latest.list': { risk: 'R2', level: 1, auth: 'A2' },
     'fuel.period.sum': { risk: 'R1', level: 1, auth: 'A1' },
     'support.handoff.request': { risk: 'R0', level: 0, auth: 'A0' },
-    'support.dispute.open': { risk: 'R0', level: 0, auth: 'A0' },
+    'support.dispute.open': { risk: 'R2', level: 1, auth: 'A2' }, // lista abastecimentos (placa e local) antes de transferir
+    'support.payment.issue': { risk: 'R0', level: 0, auth: 'A0' },
+    'support.closure.handoff': { risk: 'R0', level: 1, auth: 'A1' },
     'session.company.select': { risk: 'R0', level: 0, auth: 'A0' },
     'session.end': { risk: 'R0', level: 0, auth: 'A0' },
     'meta.greeting': { risk: 'R0', level: 0, auth: 'A0' },
@@ -47,7 +50,8 @@
 
   // A ordem importa: contestação primeiro, saudação por último.
   const RULES = [
-    [/nao reconhe|cobraram errado|cobranca errada|boleto.*errad|contest|pagamento nao (entrou|caiu)|nao fui eu|fraude/, 'support.dispute.open', 'regra'],
+    [/cobraram errado|cobranca errada|boleto.*errad|pagamento nao (entrou|caiu)|paguei e nao/, 'support.payment.issue', 'regra'],
+    [/nao reconhe|contest|nao fui eu|fraude/, 'support.dispute.open', 'regra'],
     [/atendente|humano|falar com (alguem|o financeiro|financeiro|uma pessoa|voces)/, 'support.handoff.request', 'regra'],
     [/ja fechou|fechou\?|ja foi paga|foi paga\?/, 'invoice.status.get', 'regra'],
     [/fecha.*fatura|fechamento antecipado|antecipar.*fech/, 'cycle.close.request', 'regra'],
@@ -90,11 +94,10 @@
   const freshLive = () => ({ id: 'live', live: true, msgs: [], status: 'Em andamento (bot)', risco: 'Baixo', humano: 'Não', resumo: 'Conversa conduzida pelo assistente.', log: [] });
 
   const S = {
-    sim: { nivel: 3, multi: false, desconhecido: false, api: false, pdf: false, horario: false },
+    sim: { nivel: 2, multi: false, desconhecido: false, api: false, pdf: false, horario: false },
     session: freshSession(),
     live: freshLive(),
     trace: [],
-    close: null, // solicitação de fechamento antecipado
     stats: { saldo: 0, fatura: 0, fechamento: 0, erros: 0, authFalhas: 0, humanos: 0 },
     typing: false,
     filtro: 'Todas',
@@ -153,7 +156,7 @@
 
   function api(T, method, path) {
     const down = S.sim.api;
-    T.api.push({ method, path, status: down ? 503 : method === 'POST' ? 201 : 200, ms: down ? 5000 : 40 + Math.floor(Math.random() * 140) });
+    T.api.push({ method, path, status: down ? 503 : 200, ms: down ? 5000 : 40 + Math.floor(Math.random() * 140) });
     if (down) S.stats.erros++;
     return !down;
   }
@@ -222,10 +225,10 @@
     const [k, a, b] = p.split(':');
     if (k === 'i') return { intent: a, by: 'botão', conf: 1, slots: b ? { ref: b } : {} };
     if (k === 'co') { selectCompany(a, T); return null; }
-    if (k === 'close') { a === 'go' ? closeAskPin(T) : closeCancel(T); return null; }
     if (k === 'per') return { intent: 'statement.get', by: 'botão', conf: 1, slots: { period: a } };
     if (k === 'sum') return { intent: 'fuel.period.sum', by: 'botão', conf: 1, slots: { period: a } };
     if (k === 'disp') return { intent: 'support.dispute.open', by: 'botão', conf: 1, slots: { ref: a } };
+    if (k === 'mot') return { intent: 'support.dispute.open', by: 'botão', conf: 1, slots: { ref: a, motivo: b } };
     return { intent: 'meta.help', by: 'botão', conf: 1, slots: {} };
   }
 
@@ -262,7 +265,7 @@
       T.policy = { dec: 'negado', why: `exige nível ${NIVEIS[def.level]}; o contato tem ${NIVEIS[S.sim.nivel]}` };
       return finish(T, [...pre, { html: `Seu acesso neste canal é de <b>${NIVEIS[S.sim.nivel]}</b>, e esse pedido exige o nível <b>${NIVEIS[def.level]}</b>.<br><br>O administrador da ${co().nome} pode liberar na plataforma, em Usuários → WhatsApp Financeiro.`, buttons: [{ l: 'Menu', p: 'menu' }] }], 'recusa por permissão');
     }
-    if (ss.blocked && (def.auth === 'A2' || def.auth === 'A3')) {
+    if (ss.blocked && def.auth === 'A2') {
       T.policy = { dec: 'negado', why: 'contato bloqueado por PIN incorreto' };
       return finish(T, [...pre, { html: 'As operações com documento estão bloqueadas neste número. Um administrador da sua empresa pode liberar na plataforma.', buttons: [{ l: 'Falar com financeiro', p: 'i:support.handoff.request' }] }], 'recusa por bloqueio');
     }
@@ -271,7 +274,7 @@
       ss.awaiting = { type: 'pin', cls };
       return finish(T, [...pre, { html: 'Para continuar, digite seu <b>PIN financeiro</b> de 6 dígitos.<br><small>Ele não fica salvo na conversa.</small>' }], 'pedido de PIN');
     }
-    T.policy = { dec: 'permitido', why: def.auth === 'A3' ? 'início do fluxo R3; confirmação forte adiante' : `nível ${NIVEIS[S.sim.nivel]} · sessão ${ss.auth} atende ${def.risk}` };
+    T.policy = { dec: 'permitido', why: `nível ${NIVEIS[S.sim.nivel]} · sessão ${ss.auth} atende ${def.risk} · canal somente consulta` };
     const out = HANDLERS[cls.intent](cls, T, text);
     finish(T, [...pre, ...out.msgs], out.resp);
   }
@@ -284,7 +287,6 @@
     if (text.replace(/\D/g, '') === DATA.pinDemo) {
       ss.auth = 'A2'; ss.pinTries = 0; ss.awaiting = null;
       T.policy = { dec: 'permitido', why: 'PIN conferido; sessão em A2 por 15 minutos' };
-      if (aw.next === 'close') return closeAfterPin(T);
       const out = HANDLERS[aw.cls.intent](aw.cls, T, '');
       T.note += ' Retomado o intent ' + aw.cls.intent + '.';
       return finish(T, out.msgs, out.resp);
@@ -311,7 +313,7 @@
       html: `${withHello ? `Olá, <b>${DATA.contato.primeiro}</b> 👋<br>Sou o Assistente Financeiro CP4.<br><br>` : ''}Transportadora:<br><b>${co().nome}</b><br><br>Posso te ajudar com:`,
       list: [
         { l: 'Saldo', d: 'Quanto ainda está disponível', p: 'i:account.available.get' },
-        { l: 'Faturas', d: 'Fatura atual, vencimento, PDF e boleto', p: 'i:cycle.open.get' },
+        { l: 'Faturas', d: 'Fatura atual, vencimento e PDF', p: 'i:cycle.open.get' },
         { l: 'Extrato', d: 'Movimentação da conta corrente', p: 'i:statement.get' },
         { l: 'Abastecimentos', d: 'Últimos abastecimentos e consumo', p: 'i:fuel.latest.list' },
         { l: 'Limite', d: 'Limite total e utilizado', p: 'i:account.limit.get' },
@@ -361,7 +363,7 @@
       if (!p.length) return { msgs: [{ html: `${head()}<br>Você não tem fatura pendente. Seu disponível hoje é <b>${brl(c.conta.disponivel)}</b>.` }], resp: 'template projeção' };
       const volta = p.reduce((s, f) => s + f.valor, 0);
       const proj = Math.min(c.conta.disponivel + volta, c.conta.limite);
-      return { msgs: [{ html: `${head()}<br>Disponível hoje:<br>${brl(c.conta.disponivel)}<br><br>Volta ao limite com o pagamento de ${p.length} fatura${p.length > 1 ? 's' : ''}:<br>${brl(volta)}<br><br>Disponível após o pagamento:<br><b class="big">${brl(proj)}</b><br><br><small>É uma projeção. Novos abastecimentos reduzem esse valor, e o disponível nunca passa do limite de ${brl(c.conta.limite)}.</small>`, buttons: [{ l: 'Receber boleto', p: 'i:invoice.payment.send' }, MENU] }], resp: 'template projeção' };
+      return { msgs: [{ html: `${head()}<br>Disponível hoje:<br>${brl(c.conta.disponivel)}<br><br>Volta ao limite com o pagamento de ${p.length} fatura${p.length > 1 ? 's' : ''}:<br>${brl(volta)}<br><br>Disponível após o pagamento:<br><b class="big">${brl(proj)}</b><br><br><small>É uma projeção. Novos abastecimentos reduzem esse valor, e o disponível nunca passa do limite de ${brl(c.conta.limite)}.</small>`, buttons: [{ l: 'Receber PDF', p: 'i:invoice.document.send:' + p[0].num }, MENU] }], resp: 'template projeção' };
     },
 
     'cycle.open.get': (cls, T) => {
@@ -369,7 +371,7 @@
       const cy = co().ciclo;
       if (!cy.valor) return { msgs: [{ html: `${head()}<br>Seu novo ciclo começou em ${cy.inicio} e ainda não tem abastecimentos.<br>Fechamento previsto: ${cy.fechamento}`, buttons: [{ l: 'Minhas faturas', p: 'i:invoice.list' }, MENU] }], resp: 'template ciclo vazio' };
       return {
-        msgs: [{ html: `${head()}<b>Fatura atual</b> (ciclo em aberto)<br><br>Período:<br>${cy.inicio} a ${cy.fim}<br><br>Valor acumulado:<br><b class="big">${brl(cy.valor)}</b><br>${cy.qtd} abastecimentos<br><br>Fechamento:<br>${cy.fechamento}<br><br>Vencimento:<br>${cy.vencimento}<br><br><small>Valor dos abastecimentos, ainda sem a taxa do faturamento.</small><br><br>Quer consultar os lançamentos dessa fatura?`, buttons: [{ l: 'Ver lançamentos', p: 'i:cycle.open.entries' }, { l: 'Fechar agora', p: 'i:cycle.close.request' }, { l: 'Faturas fechadas', p: 'i:invoice.list' }] }],
+        msgs: [{ html: `${head()}<b>Fatura atual</b> (ciclo em aberto)<br><br>Período:<br>${cy.inicio} a ${cy.fim}<br><br>Valor acumulado:<br><b class="big">${brl(cy.valor)}</b><br>${cy.qtd} abastecimentos<br><br>Fechamento:<br>${cy.fechamento}<br><br>Vencimento:<br>${cy.vencimento}<br><br><small>Valor dos abastecimentos, ainda sem a taxa do faturamento.</small><br><br>Quer consultar os lançamentos dessa fatura?`, buttons: [{ l: 'Ver lançamentos', p: 'i:cycle.open.entries' }, { l: 'Antecipar fechamento', p: 'i:cycle.close.request' }, { l: 'Faturas fechadas', p: 'i:invoice.list' }] }],
         resp: 'template ciclo em aberto',
       };
     },
@@ -400,39 +402,36 @@
       const prox = `Próxima fatura (ciclo em aberto): fecha em ${cy.fechamento} e vence em <b>${cy.vencimento}</b>.`;
       if (!p.length) return { msgs: [{ html: `${head()}<br>Você não tem fatura pendente.<br><br>${prox}` }], resp: 'template vencimento' };
       const f = p[0];
-      return { msgs: [{ html: `${head()}<br>Fatura <b>${f.num}</b><br>Valor: <b>${brl(totalFatura(f))}</b><br>Vencimento: <b>${f.venc}</b><br>${f.vencida ? '⚠️ ' : ''}${f.situacao}<br><br>${prox}`, buttons: [{ l: 'Receber PDF', p: 'i:invoice.document.send:' + f.num }, { l: 'Receber boleto', p: 'i:invoice.payment.send:' + f.num }] }], resp: 'template vencimento' };
+      return { msgs: [{ html: `${head()}<br>Fatura <b>${f.num}</b><br>Valor: <b>${brl(totalFatura(f))}</b><br>Vencimento: <b>${f.venc}</b><br>${f.vencida ? '⚠️ ' : ''}${f.situacao}<br><br>${prox}`, buttons: [{ l: 'Receber PDF', p: 'i:invoice.document.send:' + f.num }, MENU] }], resp: 'template vencimento' };
     },
 
     'invoice.document.send': (cls, T) => {
       const c = co(); const f = c.faturas.find((x) => x.num === cls.slots.ref) || pendentes(c)[0] || c.faturas[0];
       T.slots = { ...T.slots, invoice: f.num };
-      if (!api(T, 'POST', `/internal/v1/carriers/${c.id}/invoices/${f.num}/document`)) return { msgs: [FALHA('sua fatura')], resp: 'falha de serviço' };
+      if (!api(T, 'GET', `/internal/v1/carriers/${c.id}/invoices/${f.num}/document`)) return { msgs: [FALHA('sua fatura')], resp: 'falha de serviço' };
       if (S.sim.pdf) {
         T.api[T.api.length - 1].status = 500; S.stats.erros++;
         return { msgs: [{ html: 'Não consegui gerar o PDF da fatura agora. <b>Nenhuma alteração foi realizada.</b><br><br>Posso tentar de novo ou você pode falar com o Financeiro CP4.', buttons: [{ l: 'Tentar de novo', p: 'i:invoice.document.send:' + f.num }, { l: 'Falar com financeiro', p: 'i:support.handoff.request' }] }], resp: 'falha na geração do PDF' };
       }
       S.stats.fatura++;
-      return { msgs: [{ html: `${head()}Fatura <b>${f.num}</b><br>Período ${f.periodo}<br>${brl(totalFatura(f))} · vence ${f.venc}`, doc: { name: `fatura_${f.num}.pdf`, meta: 'PDF · 2 páginas · 148 KB' }, buttons: f.status === 'pending' ? [{ l: 'Receber boleto', p: 'i:invoice.payment.send:' + f.num }, MENU] : [MENU] }], resp: 'documento por URL assinada de uso único' };
+      return { msgs: [{ html: `${head()}Fatura <b>${f.num}</b><br>Período ${f.periodo}<br>${brl(totalFatura(f))} · vence ${f.venc}`, doc: { name: `fatura_${f.num}.pdf`, meta: 'PDF · 2 páginas · 148 KB' }, buttons: [MENU] }], resp: 'documento por URL assinada de uso único' };
     },
 
     'invoice.payment.send': (cls, T) => {
       const c = co(); const f = c.faturas.find((x) => x.num === cls.slots.ref && x.status === 'pending') || pendentes(c)[0];
-      T.note = 'Boleto não existe na plataforma hoje (decisão D2 da discovery). Fluxo-alvo simulado.';
-      if (!f) return { msgs: [{ html: `${head()}<br>Você não tem fatura pendente, então não há boleto a emitir.` }], resp: 'sem fatura pendente' };
-      T.slots = { ...T.slots, invoice: f.num };
-      if (!api(T, 'GET', `/internal/v1/carriers/${c.id}/invoices/${f.num}/payment-document`)) return { msgs: [FALHA('seu boleto')], resp: 'falha de serviço' };
-      S.stats.fatura++;
-      return { msgs: [{ html: `${head()}Boleto da fatura <b>${f.num}</b><br>Valor: <b>${brl(totalFatura(f))}</b><br>Vencimento: ${f.venc}<br><br>Linha digitável:<br><span class="mono">34191.79001 01043.510047 91020.150008 5 98760003424113</span>`, doc: { name: `boleto_${f.num}.pdf`, meta: 'PDF · 1 página · 84 KB' }, buttons: [{ l: 'Receber fatura em PDF', p: 'i:invoice.document.send:' + f.num }, MENU] }], resp: 'documento de pagamento (simulado)' };
+      T.note = 'A CP4 não emite boleto hoje (sem cobrança registrada). O canal orienta pelo PDF da fatura.';
+      if (!f) return { msgs: [{ html: `${head()}<br>Você não tem fatura pendente no momento.`, buttons: [MENU] }], resp: 'sem fatura pendente' };
+      return { msgs: [{ html: `${head()}<br>O boleto não está disponível por este canal. Os dados para pagamento da fatura <b>${f.num}</b> (${brl(totalFatura(f))}, vence ${f.venc}) estão no PDF da fatura.`, buttons: [{ l: 'Receber PDF', p: 'i:invoice.document.send:' + f.num }, { l: 'Falar com financeiro', p: 'i:support.handoff.request' }] }], resp: 'orientação: boleto fora do canal' };
     },
 
     'invoice.overdue.list': (cls, T) => {
       if (!api(T, 'GET', `/internal/v1/carriers/${co().id}/pending`)) return { msgs: [FALHA('suas pendências')], resp: 'falha de serviço' };
       const c = co(); const v = pendentes(c).filter((f) => f.vencida); const hoje = pendentes(c).filter((f) => !f.vencida);
       if (!v.length) {
-        return { msgs: [{ html: `${head()}<br>✅ Você <b>não tem pagamentos em atraso</b>.${hoje.length ? `<br><br>Fatura pendente: <b>${hoje[0].num}</b>, ${brl(totalFatura(hoje[0]))}. ${hoje[0].situacao} (${hoje[0].venc}).` : ''}`, buttons: hoje.length ? [{ l: 'Receber boleto', p: 'i:invoice.payment.send:' + hoje[0].num }, MENU] : [MENU] }], resp: 'template pendências' };
+        return { msgs: [{ html: `${head()}<br>✅ Você <b>não tem pagamentos em atraso</b>.${hoje.length ? `<br><br>Fatura pendente: <b>${hoje[0].num}</b>, ${brl(totalFatura(hoje[0]))}. ${hoje[0].situacao} (${hoje[0].venc}).` : ''}`, buttons: hoje.length ? [{ l: 'Receber PDF', p: 'i:invoice.document.send:' + hoje[0].num }, MENU] : [MENU] }], resp: 'template pendências' };
       }
       const tot = v.reduce((s, f) => s + totalFatura(f), 0);
-      return { msgs: [{ html: `${head()}<br>⚠️ Você tem <b>${v.length} fatura vencida</b>:<br><br>${v.map((f) => `<b>${f.num}</b><br>${brl(totalFatura(f))} · venceu em ${f.venc}<br>${f.situacao}`).join('<br><br>')}<br><br>Total em atraso: <b>${brl(tot)}</b><br><br><small>Encargos por atraso são calculados pelo Financeiro CP4.</small>`, buttons: [{ l: 'Receber boleto', p: 'i:invoice.payment.send:' + v[0].num }, { l: 'Falar com financeiro', p: 'i:support.handoff.request' }] }], resp: 'template pendências' };
+      return { msgs: [{ html: `${head()}<br>⚠️ Você tem <b>${v.length} fatura vencida</b>:<br><br>${v.map((f) => `<b>${f.num}</b><br>${brl(totalFatura(f))} · venceu em ${f.venc}<br>${f.situacao}`).join('<br><br>')}<br><br>Total em atraso: <b>${brl(tot)}</b><br><br><small>Encargos por atraso são calculados pelo Financeiro CP4.</small>`, buttons: [{ l: 'Receber PDF', p: 'i:invoice.document.send:' + v[0].num }, { l: 'Falar com financeiro', p: 'i:support.handoff.request' }] }], resp: 'template pendências' };
     },
 
     'statement.get': (cls, T) => {
@@ -445,7 +444,7 @@
     },
 
     'statement.document.send': (cls, T) => {
-      if (!api(T, 'POST', `/internal/v1/carriers/${co().id}/statement/document`)) return { msgs: [FALHA('seu extrato')], resp: 'falha de serviço' };
+      if (!api(T, 'GET', `/internal/v1/carriers/${co().id}/statement/document`)) return { msgs: [FALHA('seu extrato')], resp: 'falha de serviço' };
       if (S.sim.pdf) {
         T.api[T.api.length - 1].status = 500; S.stats.erros++;
         return { msgs: [{ html: 'Não consegui gerar o PDF do extrato agora. <b>Nenhuma alteração foi realizada.</b>', buttons: [{ l: 'Tentar de novo', p: 'i:statement.document.send' }, MENU] }], resp: 'falha na geração do PDF' };
@@ -468,19 +467,50 @@
       return { msgs: [{ html: `${head()}<b>Consumo de ${k.mes.nome}</b> (até ${DATA.hoje})<br><br>Total abastecido:<br><b class="big">${brl(k.mes.valor)}</b><br>${dec(k.mes.litros)} L em ${k.mes.qtd} abastecimentos<br><br>${k.anterior.nome[0].toUpperCase() + k.anterior.nome.slice(1)} inteiro:<br>${brl(k.anterior.valor)} · ${dec(k.anterior.litros)} L · ${k.anterior.qtd} abastecimentos`, buttons: [{ l: 'Ver abastecimentos', p: 'i:fuel.latest.list' }, { l: 'Gasto de hoje', p: 'sum:hoje' }] }], resp: 'template consumo do mês' };
     },
 
-    'support.dispute.open': (cls, T, text) => {
+    // Contestação: o canal só coleta abastecimento e motivo e transfere. Não abre protocolo nem bloqueia nada.
+    'support.dispute.open': (cls, T) => {
       const c = co();
       if (!cls.slots.ref) {
-        if (/pagamento|boleto|cobr/.test(norm(text || ''))) return handoff(T, 'Contestação de cobrança ou pagamento', `Cliente escreveu: "${text}". ${pendentes(c)[0] ? 'Fatura pendente: ' + pendentes(c)[0].num + '.' : ''}`, 'Alto');
-        return { msgs: [{ html: 'Sinto muito por isso. Para eu passar ao Financeiro CP4 já com os dados, qual abastecimento você não reconhece?', list: [...c.abastecimentos.map((a) => ({ l: `#${a.id} · ${brl(a.valor)}`, d: `${a.quando} · ${a.placa} · ${a.posto}`, p: 'disp:' + a.id })), { l: 'É outro assunto', d: 'Falar direto com o financeiro', p: 'i:support.handoff.request' }] }], resp: 'triagem: identificação do objeto contestado' };
+        if (!api(T, 'GET', `/internal/v1/carriers/${c.id}/fuelings?limit=5`)) return { msgs: [FALHA('seus abastecimentos')], resp: 'falha de serviço' };
+        return { msgs: [{ html: 'Sinto muito por isso. Para eu passar ao Financeiro CP4 já com os dados, qual abastecimento você não reconhece?', list: [...c.abastecimentos.map((a) => ({ l: `#${a.id} · ${brl(a.valor)}`, d: `${a.quando} · ${a.placa} · ${a.posto}`, p: 'disp:' + a.id })), { l: 'É outro assunto', d: 'Falar direto com o financeiro', p: 'i:support.handoff.request' }] }], resp: 'triagem: qual abastecimento' };
       }
       const a = c.abastecimentos.find((x) => String(x.id) === String(cls.slots.ref));
-      return handoff(T, 'Abastecimento não reconhecido', `Contesta o pedido #${a.id} (${a.quando}, ${a.posto}, placa ${a.placa}, ${brl(a.valor)}).`, 'Alto');
+      if (!cls.slots.motivo) {
+        return { msgs: [{ html: `Pedido <b>#${a.id}</b> · ${a.quando} · ${esc(a.posto)} · ${a.placa} · ${brl(a.valor)}<br><br>O que aconteceu?`, buttons: [{ l: 'Não fui eu', p: `mot:${a.id}:naofui` }, { l: 'Valor ou litros errados', p: `mot:${a.id}:valor` }, { l: 'Outro motivo', p: `mot:${a.id}:outro` }] }], resp: 'triagem: motivo' };
+      }
+      const MOT = { naofui: 'não reconhece o abastecimento ("não fui eu")', valor: 'valor ou litros divergentes', outro: 'outro motivo' };
+      const naoFui = cls.slots.motivo === 'naofui';
+      const out = handoff(T, 'Contestação de abastecimento', `Contesta o pedido #${a.id} (${a.quando}, ${a.posto}, placa ${a.placa}, ${brl(a.valor)}). Motivo: ${MOT[cls.slots.motivo]}.`, naoFui ? 'Alto' : 'Médio');
+      if (naoFui) out.msgs.push({ html: 'Se o veículo <b>não estava</b> com sua empresa nesse horário, recomendamos bloqueá-lo agora na plataforma CP4, em Frota → Veículos. O bloqueio não é feito por aqui.' });
+      return out;
+    },
+
+    'support.payment.issue': (cls, T, text) => {
+      const p = pendentes(co())[0];
+      return handoff(T, 'Divergência de cobrança ou pagamento', `Cliente escreveu: "${text}". ${p ? 'Fatura pendente: ' + p.num + '.' : ''}`, 'Alto');
     },
 
     'support.handoff.request': (cls, T) => handoff(T, 'Pedido de atendimento humano', 'Cliente pediu para falar com o Financeiro CP4.', 'Médio'),
 
-    'cycle.close.request': (cls, T) => closeStart(T),
+    // Fechamento antecipado: o canal mostra o ciclo e transfere. O financeiro executa no Admin, como hoje.
+    'cycle.close.request': (cls, T) => {
+      const c = co(); const cy = c.ciclo;
+      if (!api(T, 'GET', `/internal/v1/carriers/${c.id}/open-cycle`)) return { msgs: [FALHA('sua fatura')], resp: 'falha de serviço' };
+      T.note = 'Canal somente consulta: nenhuma chamada de escrita. Se o cliente quiser, a conversa vai para o Financeiro CP4.';
+      if (!cy.valor) return { msgs: [{ html: `${head()}<br>O ciclo atual ainda não tem abastecimentos, então não há o que fechar.`, buttons: [MENU] }], resp: 'ciclo vazio' };
+      const taxa = Math.round(cy.valor * cy.taxaPct) / 100;
+      const vencida = pendentes(c).some((f) => f.vencida);
+      return {
+        msgs: [{ html: `${head()}<b>Fatura atual</b> (ciclo em aberto)<br><br>Período: ${cy.inicio} até hoje<br>Abastecimentos: ${brl(cy.valor)} (${cy.qtd})<br>Taxa estimada (${dec(cy.taxaPct)}%): ${brl(taxa)}<br>Total estimado: <b>${brl(cy.valor + taxa)}</b><br><br>O fechamento antecipado é feito pelo <b>Financeiro CP4</b>. Lembre que fechar <b>não libera limite</b>: o limite volta quando a fatura é paga.${vencida ? '<br><br>⚠️ Existe uma fatura vencida nesta conta; o financeiro vai tratar as duas juntas.' : ''}<br><br>Quer que eu passe seu pedido ao financeiro?`, buttons: [{ l: 'Falar com o financeiro', p: 'i:support.closure.handoff' }, MENU] }],
+        resp: 'informativo do ciclo + oferta de atendente',
+      };
+    },
+
+    'support.closure.handoff': (cls, T) => {
+      const cy = co().ciclo;
+      S.stats.fechamento++;
+      return handoff(T, 'Pedido de fechamento antecipado', `Pede fechamento antecipado do ciclo ${cy.inicio}–hoje: ${brl(cy.valor)} em ${cy.qtd} abastecimentos (taxa ainda estimada).`, 'Alto');
+    },
 
     'session.company.select': () => {
       if (!S.sim.multi) return { msgs: [{ html: `Seu número está vinculado só à <b>${co().nome}</b>.` }], resp: 'texto fixo' };
@@ -506,143 +536,6 @@
     }
     L.status = 'Aguardando atendente'; L.humano = 'Na fila';
     return { msgs: [{ html: `Certo. Vou te passar para o <b>Financeiro CP4</b>.<br><br>Já enviei para a equipe o assunto (<b>${esc(motivo)}</b>) e o histórico desta conversa. Você não precisa explicar de novo.` }, { dir: 'sys', html: 'Conversa na fila do Financeiro CP4 · posição 3 · espera estimada de 4 min' }], resp: 'transbordo com contexto' };
-  }
-
-  // ---------------------------------------------------------------- fechamento antecipado
-  function closeStart(T) {
-    const c = co(); const cy = c.ciclo;
-    if (S.close && ['pendente', 'aguardando'].includes(S.close.status)) {
-      return { msgs: [{ html: `Já existe uma solicitação de fechamento em andamento: <b>${S.close.protocolo}</b>.`, buttons: [MENU] }], resp: 'solicitação duplicada recusada' };
-    }
-    if (!api(T, 'GET', `/internal/v1/carriers/${c.id}/open-cycle?preview=close`)) return { msgs: [FALHA('sua fatura')], resp: 'falha de serviço' };
-    if (!cy.valor) return { msgs: [{ html: `${head()}<br>O ciclo atual ainda não tem abastecimentos para fechar.` }], resp: 'ciclo vazio' };
-    if (pendentes(c).some((f) => f.vencida)) {
-      T.policy = { dec: 'transbordo', why: 'há fatura vencida; fechamento antecipado só pelo Financeiro CP4' };
-      return { msgs: [{ html: `${head()}<br>Existe uma fatura vencida nesta conta. Nessa situação, o fechamento antecipado precisa ser tratado com o Financeiro CP4.`, buttons: [{ l: 'Falar com financeiro', p: 'i:support.handoff.request' }, { l: 'Ver pendências', p: 'i:invoice.overdue.list' }] }], resp: 'regra de negócio: transbordo' };
-    }
-    const taxa = Math.round(cy.valor * cy.taxaPct) / 100;
-    S.session.closeDraft = { valor: cy.valor, taxa, total: cy.valor + taxa, periodo: `${cy.inicio} a ${DATA.hoje}`, venc: cy.vencimento, qtd: cy.qtd, taxaPct: cy.taxaPct };
-    const d = S.session.closeDraft;
-    return {
-      msgs: [{ html: `${head()}Você está solicitando o <b>fechamento antecipado</b> da fatura atual.<br><br>Período: ${d.periodo}<br>Abastecimentos: ${brl(d.valor)} (${d.qtd})<br>Taxa estimada (${dec(d.taxaPct)}%): ${brl(d.taxa)}<br>Total estimado: <b>${brl(d.total)}</b><br>Vencimento estimado: ${d.venc}<br><br>• Após o fechamento, novos abastecimentos entram no próximo ciclo.<br>• O fechamento <b>não libera limite</b>; o limite volta quando a fatura é paga.<br><br>Deseja continuar?`, buttons: [{ l: 'Continuar', p: 'close:go' }, { l: 'Cancelar', p: 'close:cancel' }] }],
-      resp: 'prévia do fechamento (valores calculados pela plataforma)',
-    };
-  }
-
-  function closeAskPin(T) {
-    T.intent = 'cycle.close.request'; T.by = 'botão'; T.conf = 1; T.risk = 'R3';
-    if (!S.session.closeDraft) { T.policy = { dec: 'negado', why: 'não há prévia de fechamento válida' }; return finish(T, [{ html: 'Essa confirmação expirou. Peça o fechamento de novo para ver os valores atualizados.' }], 'ação pendente expirada'); }
-    T.policy = { dec: 'reforço', why: 'classe R3: PIN pedido de novo, mesmo com sessão em A2' };
-    S.session.awaiting = { type: 'pin', next: 'close' };
-    finish(T, [{ html: 'Para confirmar que é você, digite seu <b>PIN financeiro</b>.' }], 'pedido de PIN');
-  }
-
-  function closeCancel(T) {
-    T.intent = 'cycle.close.request'; T.by = 'botão'; T.conf = 1; T.risk = 'R3';
-    T.policy = { dec: 'cancelado', why: 'cliente desistiu' };
-    S.session.closeDraft = null;
-    finish(T, [{ html: 'Tudo bem, cancelei o pedido de fechamento. <b>Nada foi alterado.</b>', buttons: [MENU] }], 'cancelamento');
-  }
-
-  function closeAfterPin(T) {
-    const d = S.session.closeDraft; const c = co();
-    T.intent = 'cycle.close.request'; T.risk = 'R3';
-    if (!api(T, 'POST', `/internal/v1/carriers/${c.id}/open-cycle/close-requests`)) { return finish(T, [FALHA('sua solicitação')], 'falha de serviço'); }
-    const proprio = S.sim.nivel >= 3;
-    S.close = { status: 'pendente', protocolo: 'FA-2026-0412', ...d, empresa: c.nome, solicitante: DATA.contato.nome, aprovador: proprio ? DATA.contato.nome : DATA.aprovador, criado: hhmm(), expira: Date.now() + 10 * 60 * 1000 };
-    S.session.closeDraft = null;
-    S.stats.fechamento++;
-    S.live.status = 'Aguardando aprovador'; S.live.risco = 'Alto';
-    S.live.resumo = `Solicitou fechamento antecipado de ${brl(d.valor)}. PIN validado. Aguardando confirmação na plataforma.`;
-    T.policy = { dec: 'reforço', why: 'PIN conferido; falta confirmação dentro da plataforma (A3)' };
-    T.note = 'Ação pendente com parâmetros congelados, uso único e validade de 10 minutos.';
-    const msg = proprio
-      ? { html: `PIN conferido.<br><br>Falta a última etapa: <b>confirmar dentro da plataforma CP4</b>, com sua senha e o código do autenticador. O link vale por 10 minutos e só funciona uma vez.<br><br>Protocolo: <b>${S.close.protocolo}</b>`, buttons: [{ l: 'Abrir na plataforma', p: 'open' }] }
-      : { html: `PIN conferido.<br><br>Seu nível é Financeiro, então o fechamento precisa da autorização de um aprovador. Enviei o pedido para <b>${DATA.aprovador}</b>, que confirma dentro da plataforma CP4. O link vale por 10 minutos.<br><br>Protocolo: <b>${S.close.protocolo}</b>` };
-    finish(T, [msg], 'link de confirmação de uso único');
-  }
-
-  function openPlatform() {
-    const k = S.close;
-    if (!k || k.status !== 'pendente') return toast('Não há confirmação pendente.');
-    $('#modal-url').textContent = `transportadora.cp4.com.br/financeiro/confirmacoes/${k.protocolo}`;
-    $('#modal-body').innerHTML = `
-      <div class="plat-head"><img src="logo-white.png" alt="CP4"><span>${esc(k.empresa)} · ${esc(k.aprovador)}</span></div>
-      <h2 id="modal-h">Confirmar fechamento antecipado</h2>
-      <p class="muted">Solicitado por ${esc(k.solicitante)} pelo WhatsApp às ${k.criado}. Expira em <b id="count"></b>.</p>
-      <dl class="dl">
-        <dt>Período</dt><dd>${k.periodo}</dd>
-        <dt>Abastecimentos</dt><dd>${brl(k.valor)} · ${k.qtd} pedidos</dd>
-        <dt>Taxa estimada (${dec(k.taxaPct)}%)</dt><dd>${brl(k.taxa)}</dd>
-        <dt>Total estimado</dt><dd><strong>${brl(k.total)}</strong></dd>
-        <dt>Vencimento estimado</dt><dd>${k.venc}</dd>
-      </dl>
-      <ul class="notes">
-        <li>Novos abastecimentos entram no próximo ciclo.</li>
-        <li>O limite só é liberado no pagamento da fatura.</li>
-        <li>O Financeiro CP4 confere e conclui o fechamento.</li>
-      </ul>
-      <label class="fld">Código do autenticador (2FA)
-        <input id="totp" inputmode="numeric" maxlength="6" placeholder="6 dígitos" autocomplete="off">
-      </label>
-      <p class="err" id="totp-err" hidden>Informe os 6 dígitos do autenticador.</p>
-      <div class="row end">
-        <button class="btn ghost" id="plat-no">Recusar</button>
-        <button class="btn primary" id="plat-ok">Confirmar solicitação</button>
-      </div>`;
-    $('#modal').hidden = false;
-    const tick = () => {
-      const s = Math.max(0, Math.round((k.expira - Date.now()) / 1000));
-      const el = $('#count'); if (el) el.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-    };
-    tick(); clearInterval(S.timer); S.timer = setInterval(tick, 1000);
-    $('#totp').focus();
-    $('#plat-ok').onclick = () => {
-      if (!/^\d{6}$/.test($('#totp').value)) { $('#totp-err').hidden = false; return; }
-      closeModal(); closeConfirm(true);
-    };
-    $('#plat-no').onclick = () => { closeModal(); closeConfirm(false); };
-  }
-
-  function closeModal() { $('#modal').hidden = true; clearInterval(S.timer); }
-
-  function closeConfirm(ok) {
-    const k = S.close;
-    const T = newTrace('(confirmação feita na plataforma)');
-    T.intent = 'cycle.close.confirm'; T.by = 'plataforma CP4'; T.conf = 1; T.risk = 'R3'; T.auth = 'A3';
-    api(T, 'POST', `/internal/v1/carriers/${co().id}/close-requests/${k.protocolo}/confirm`);
-    T.company = co().nome;
-    if (!ok) {
-      k.status = 'recusado'; S.live.status = 'Em andamento (bot)';
-      S.live.resumo = 'Fechamento antecipado recusado na plataforma.';
-      T.policy = { dec: 'negado', why: 'recusado pelo aprovador na plataforma' }; T.resp = 'aviso de recusa';
-      S.trace.unshift(T);
-      reply([{ html: `A solicitação <b>${k.protocolo}</b> foi recusada na plataforma. <b>Nada foi alterado.</b>`, buttons: [MENU] }]);
-      return renderSide();
-    }
-    k.status = 'aguardando';
-    S.live.status = 'Fechamento solicitado'; S.live.risco = 'Alto'; S.live.humano = 'Na fila';
-    S.live.resumo = `Fechamento antecipado ${k.protocolo} confirmado por ${k.aprovador} com senha e 2FA. Aguardando execução pelo Financeiro CP4.`;
-    T.policy = { dec: 'permitido', why: `confirmado por ${k.aprovador} com senha + 2FA (A3); parâmetros conferidos pelo hash` };
-    T.resp = 'protocolo de solicitação';
-    T.auth = 'A3';
-    S.trace.unshift(T);
-    reply([{ html: `✅ Solicitação confirmada.<br><br>Protocolo: <b>${k.protocolo}</b><br>Confirmado por: ${esc(k.aprovador)}<br><br>O Financeiro CP4 conclui o fechamento em até 2 horas úteis. Quando a fatura fechar, você recebe o PDF aqui.`, buttons: [MENU] }]);
-    renderSide();
-  }
-
-  function executarFechamento() {
-    const k = S.close; const c = co(); const cy = c.ciclo;
-    const num = 'INV-20261002-R3MX';
-    c.faturas.unshift({ num, periodo: k.periodo, valor: k.valor, taxa: k.taxa, venc: k.venc, status: 'pending', situacao: 'Vence em ' + k.venc });
-    cy.valor = 0; cy.qtd = 0; cy.inicio = DATA.hoje;
-    k.status = 'executado';
-    S.live.status = 'Em andamento (bot)'; S.live.humano = 'Não'; S.live.risco = 'Médio';
-    S.live.resumo = `Fechamento ${k.protocolo} executado por ${DATA.atendente}. Fatura ${num} gerada.`;
-    S.live.log.push(`${hhmm()} · ${DATA.atendente} executou o fechamento ${k.protocolo} → fatura ${num}`);
-    push(S.live, { dir: 'out', tpl: 'cp4_fatura_fechada', html: `Sua fatura <b>${num}</b> fechou em ${DATA.hoje}.<br>Valor: <b>${brl(k.total)}</b><br>Vencimento: <b>${k.venc}</b>`, doc: { name: `fatura_${num}.pdf`, meta: 'PDF · 2 páginas · 139 KB' }, buttons: [{ l: 'Receber boleto', p: 'i:invoice.payment.send:' + num }, MENU] });
-    toast('Fechamento executado. O cliente recebeu a fatura no WhatsApp.');
-    renderAll();
   }
 
   // ---------------------------------------------------------------- telefone
@@ -679,12 +572,9 @@
     }
     $('#audit tbody').innerHTML = S.trace.slice(0, 12).map((t) => `<tr><td>${t.t}</td><td class="mono">${esc(t.intent)}</td><td>${t.auth}</td><td>${esc(t.policy.dec)}</td><td>${t.api.length ? t.api.map((a) => a.status).join(', ') : '—'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Sem eventos ainda.</td></tr>';
 
-    const k = S.close; const pend = $('#pendente');
-    if (k && k.status === 'pendente') {
-      pend.innerHTML = `<div class="pendbox"><strong>Ação pendente ${k.protocolo}</strong><span>Fechamento antecipado · ${brl(k.total)} · aprovador: ${esc(k.aprovador)}</span><button class="btn primary" id="btn-open">Abrir confirmação na plataforma${S.sim.nivel < 3 ? ' (como ' + esc(k.aprovador) + ')' : ''}</button></div>`;
-      $('#btn-open').onclick = openPlatform;
-    } else if (k && k.status === 'aguardando') {
-      pend.innerHTML = `<div class="pendbox"><strong>${k.protocolo} aguardando o Financeiro CP4</strong><span>Abra a conversa na Central Financeira e execute o fechamento.</span><button class="btn primary" id="btn-go">Ir para a Central</button></div>`;
+    const pend = $('#pendente');
+    if (S.live.humano === 'Na fila') {
+      pend.innerHTML = `<div class="pendbox"><strong>Conversa na fila do Financeiro CP4</strong><span>${esc(S.live.motivo || 'Atendimento humano')}. Abra a Central para ver o contexto que o atendente recebe.</span><button class="btn primary" id="btn-go">Ir para a Central</button></div>`;
       $('#btn-go').onclick = () => { show('central'); openConv('live'); };
     } else pend.innerHTML = '';
   }
@@ -724,7 +614,7 @@
       ['Atendimentos humanos', k.humanos + st.humanos],
       ['Consultas de saldo', k.saldo + st.saldo],
       ['Solicitações de fatura', k.fatura + st.fatura],
-      ['Fechamentos de fatura', k.fechamento + st.fechamento],
+      ['Pedidos de fechamento', k.fechamento + st.fechamento, '', 'tratados pelo financeiro'],
       ['Erros', k.erros + st.erros, st.erros ? 'bad' : ''],
       ['Autenticações falhas', k.authFalhas + st.authFalhas, st.authFalhas ? 'warn' : ''],
       ['SLA 1ª resposta humana', k.sla, '', 'meta: 5 min'],
@@ -768,7 +658,6 @@
     const c = getConv(S.sel); const raw = rawConv(S.sel);
     const assumida = c.status === 'Em atendimento';
     const encerrada = c.status === 'Encerrada';
-    const k = c.live ? S.close : null;
     const a = c.conta;
     $('#central-detalhe').innerHTML = `
       <div class="pagehead">
@@ -816,11 +705,11 @@
           </section>
           <section class="card">
             <h2>Ações</h2>
-            ${k && k.status === 'aguardando' ? `<div class="pendbox"><strong>Solicitação ${k.protocolo}</strong><span>Fechamento antecipado · ${brl(k.total)} · confirmado por ${esc(k.aprovador)} com 2FA</span><button class="btn primary" data-act="fechar">Executar fechamento solicitado</button></div>` : ''}
+            ${c.motivo === 'Pedido de fechamento antecipado' || c.intent === 'cycle.close.request' ? '<p class="muted small">O fechamento é executado no Admin CP4, pelo processo atual. Registre aqui o resultado ao responder o cliente.</p>' : ''}
+            ${/Contestação/.test(c.motivo || '') || c.intent === 'support.dispute.open' ? '<p class="muted small">A análise da contestação segue o processo atual do financeiro. O canal não bloqueia veículo nem estorna.</p>' : ''}
             <div class="acts">
               <button class="btn primary" data-act="assumir" ${assumida || encerrada ? 'disabled' : ''}>Assumir atendimento</button>
               <button class="btn" data-act="fatura" ${a ? '' : 'disabled'}>Enviar fatura</button>
-              <button class="btn" data-act="boleto" ${a ? '' : 'disabled'}>Enviar boleto</button>
               <button class="btn" data-act="conta" ${a ? '' : 'disabled'}>Consultar conta</button>
               <button class="btn danger" data-act="encerrar" ${encerrada ? 'disabled' : ''}>Encerrar atendimento</button>
             </div>
@@ -846,17 +735,15 @@
       push(raw, { dir: 'sys', html: 'Atendimento encerrado. O assistente voltou a responder.' });
       if (raw.live) S.session.mode = 'bot';
       log('encerrou o atendimento');
-    } else if (name === 'fatura' || name === 'boleto') {
+    } else if (name === 'fatura') {
       const num = raw.live ? (pendentes(co())[0] || co().faturas[0]).num : 'INV-20260928-0000';
-      push(raw, { dir: 'agent', who, html: name === 'fatura' ? `Segue a fatura <b>${num}</b>.` : `Segue o boleto da fatura <b>${num}</b>.`, doc: { name: `${name}_${num}.pdf`, meta: name === 'fatura' ? 'PDF · 2 páginas · 148 KB' : 'PDF · 1 página · 84 KB' } });
-      log(`enviou ${name === 'fatura' ? 'a fatura' : 'o boleto'} ${num}`);
-      toast(name === 'fatura' ? 'Fatura enviada ao cliente.' : 'Boleto enviado ao cliente.');
+      push(raw, { dir: 'agent', who, html: `Segue a fatura <b>${num}</b>.`, doc: { name: `fatura_${num}.pdf`, meta: 'PDF · 2 páginas · 148 KB' } });
+      log(`enviou a fatura ${num} ao contato verificado`);
+      toast('Fatura enviada ao cliente.');
     } else if (name === 'conta') {
       raw.consulta = `Posição consultada às ${hhmm()} por ${who}. Consulta registrada na auditoria.`;
       log('consultou a conta da transportadora');
       toast('Conta consultada. A consulta ficou registrada.');
-    } else if (name === 'fechar') {
-      return executarFechamento();
     }
     renderAll();
   }
@@ -908,8 +795,8 @@
           <thead><tr><th>Classe</th><th>Exemplos</th><th>Exigência</th></tr></thead>
           <tbody>
             <tr><td>R1 Consulta agregada</td><td>Saldo, limite, vencimento, valor da fatura</td><td><select><option>Número cadastrado (A1)</option><option>PIN financeiro (A2)</option></select></td></tr>
-            <tr><td>R2 Detalhe e documentos</td><td>Extrato, lançamentos, PDF, boleto</td><td><select><option>PIN financeiro (A2)</option><option>Confirmação na plataforma (A3)</option></select></td></tr>
-            <tr><td>R3 Altera estado</td><td>Fechamento antecipado</td><td><select><option>PIN + confirmação na plataforma com 2FA (A3)</option></select></td></tr>
+            <tr><td>R2 Detalhe e documentos</td><td>Extrato, lançamentos, PDF, abastecimentos (placa e local)</td><td><select><option>PIN financeiro (A2)</option></select></td></tr>
+            <tr><td>Fora do canal</td><td>Fechamento antecipado, contestação, negociação, limite, cadastro</td><td>Transferência para o Financeiro CP4 · o canal não altera nada</td></tr>
           </tbody>
         </table></div>
         <div class="grid2">
@@ -927,31 +814,29 @@
       <section class="card">
         <h2>Permissões</h2>
         <div class="tablewrap"><table class="tbl perm">
-          <thead><tr><th>Capacidade</th><th>Consulta</th><th>Financeiro</th><th>Aprovador</th></tr></thead>
+          <thead><tr><th>Capacidade (somente consulta)</th><th>Consulta</th><th>Financeiro</th></tr></thead>
           <tbody>${[
-            ['Saldo, limite, fatura, vencimento, pendências', 1, 1, 1],
-            ['Consumo e últimos abastecimentos', 1, 1, 1],
-            ['Extrato resumido na conversa', 1, 1, 1],
-            ['PDF da fatura e segunda via', 0, 1, 1],
-            ['Boleto', 0, 1, 1],
-            ['Extrato em documento', 0, 1, 1],
-            ['Solicitar fechamento antecipado', 0, 1, 1],
-            ['Autorizar fechamento antecipado', 0, 0, 1],
-          ].map(([l, a, b, c]) => `<tr><td>${l}</td>${[a, b, c].map((v) => `<td>${v ? '<span class="yes">Sim</span>' : '<span class="no">Não</span>'}</td>`).join('')}</tr>`).join('')}</tbody>
+            ['Saldo, limite, fatura, vencimento, pendências', 1, 1],
+            ['Consumo e últimos abastecimentos', 1, 1],
+            ['Extrato resumido na conversa', 1, 1],
+            ['PDF da fatura', 0, 1],
+            ['Extrato em documento', 0, 1],
+            ['Pedir fechamento ou contestar (vai para o financeiro)', 1, 1],
+          ].map(([l, a, b]) => `<tr><td>${l}</td>${[a, b].map((v) => `<td>${v ? '<span class="yes">Sim</span>' : '<span class="no">Não</span>'}</td>`).join('')}</tr>`).join('')}</tbody>
         </table></div>
-        <p class="muted small">O nível de cada usuário é concedido pelo administrador da transportadora, na plataforma.</p>
+        <p class="muted small">O nível de cada usuário é concedido pelo administrador da transportadora, na plataforma. Nenhum nível altera dado financeiro pelo WhatsApp.</p>
       </section>
 
       <section class="card">
-        <h2>Limites para operações sensíveis</h2>
+        <h2>Escopo do canal</h2>
+        <p class="muted small">O WhatsApp Financeiro é <b>somente consulta</b>. A API financeira usada pelo canal aceita apenas leitura.</p>
         <div class="grid2">
-          ${f('Valor máximo de fechamento por autoatendimento', 'R$ 150.000,00', 'Acima disso, o pedido vai direto para o Financeiro CP4.')}
-          ${sel('Fechamentos antecipados por ciclo', ['1', '2', 'Sem limite'])}
-          ${f('Exigir aprovador diferente do solicitante acima de', 'R$ 50.000,00')}
-          <div class="fld">Bloqueios
-            ${chk('Bloquear fechamento com fatura vencida', true)}
-            ${chk('Bloquear fechamento com pedidos em Token Enviado', true)}
-            ${chk('Fechamento executado pelo Financeiro CP4 (solicitação)', true)}
+          ${sel('Pedido de fechamento antecipado', ['Mostrar o ciclo e transferir para a fila Fechamento'])}
+          ${sel('Contestação de abastecimento', ['Coletar abastecimento e motivo e transferir para a fila Contestação'])}
+          <div class="fld">Desligar sem deploy (kill switch)
+            ${chk('Canal ativo', true)}
+            ${chk('Envio de documentos (PDF) ativo', true)}
+            ${chk('Classificação por LLM ativa (desligada usa só regras e botões)', true)}
           </div>
         </div>
       </section>`;
@@ -974,7 +859,7 @@
 
   function reset(msg) {
     DATA.empresas = JSON.parse(BASE);
-    S.session = freshSession(); S.live = freshLive(); S.trace = []; S.close = null;
+    S.session = freshSession(); S.live = freshLive(); S.trace = [];
     S.stats = { saldo: 0, fatura: 0, fechamento: 0, erros: 0, authFalhas: 0, humanos: 0 };
     if (S.sel === 'live') { S.sel = null; $('#central-lista').hidden = false; $('#central-detalhe').hidden = true; }
     renderAll();
@@ -995,7 +880,6 @@
     });
     $('#chat').addEventListener('click', (e) => {
       const b = e.target.closest('[data-p]'); if (!b) return;
-      if (b.dataset.p === 'open') return openPlatform();
       inbound(b.dataset.l, b.dataset.p);
     });
 
@@ -1008,7 +892,7 @@
     $('#btn-reset').addEventListener('click', () => reset('Conversa reiniciada.'));
     $('#btn-expirar').addEventListener('click', () => {
       if (!S.session.started) return toast('Não há sessão ativa.');
-      S.session.auth = 'A1'; S.session.awaiting = null; S.session.closeDraft = null;
+      S.session.auth = 'A1'; S.session.awaiting = null;
       push(S.live, { dir: 'sys', html: 'Sessão expirada por inatividade. O PIN será pedido de novo.' });
       renderAll();
     });
@@ -1030,9 +914,6 @@
       $('#ag-text').focus();
     });
 
-    $('#modal-x').addEventListener('click', closeModal);
-    $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
     $('#btn-salvar').addEventListener('click', () => toast('Configurações salvas (simulação).'));
 
     renderConfig();

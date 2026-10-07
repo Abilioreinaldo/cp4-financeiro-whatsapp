@@ -3,7 +3,6 @@ const DATA = {
   hoje: '02/10/2026',
   pinDemo: '135790',
   contato: { nome: 'Abílio Reinaldo', primeiro: 'Abílio', fone: '+55 33 9••••-4417' },
-  aprovador: 'Marina Duarte',
   atendente: 'Camila Prates',
 
   empresas: {
@@ -82,10 +81,10 @@ const DATA = {
   // Conversas de exemplo da Central. A primeira linha da lista é a conversa ao vivo do protótipo.
   conversas: [
     {
-      id: 'c2', empresa: 'Rodoviário Vale do Aço', cnpj: '08.731.264/0001-90', contato: 'Marina Duarte', nivel: 'Aprovador', fone: '+55 31 9••••-2208',
+      id: 'c2', empresa: 'Rodoviário Vale do Aço', cnpj: '08.731.264/0001-90', contato: 'Marina Duarte', nivel: 'Financeiro', fone: '+55 31 9••••-2208', motivo: 'Contestação de abastecimento',
       ultima: 'não reconheço esse abastecimento de ontem', intent: 'support.dispute.open', status: 'Aguardando atendente', risco: 'Alto', humano: 'Na fila', hora: '14:21',
       conta: { disponivel: 12380.40, limite: 60000, fatura: 19204.75, venc: '12/10/2026', situacao: '1 fatura vencida há 4 dias' },
-      resumo: 'Contesta o pedido #48118 (01/10 15:02, Posto Timóteo BR-381, placa OQM-8J52, R$ 1.589,75).',
+      resumo: 'Contesta o pedido #48118 (01/10 15:02, Posto Timóteo BR-381, placa OQM-8J52, R$ 1.589,75). Motivo: não reconhece o abastecimento ("não fui eu").',
       abastecimentos: ['02/10 11:27 · PVA-3H17 · R$ 1.856,90', '01/10 15:02 · OQM-8J52 · R$ 1.589,75', '30/09 10:48 · PVA-3H17 · R$ 2.311,50'],
       msgs: [
         { dir: 'in', html: 'quais foram meus últimos abastecimentos?', t: '14:17' },
@@ -93,28 +92,31 @@ const DATA = {
         { dir: 'in', html: '••••••', t: '14:18' },
         { dir: 'out', html: '<b>Rodoviário Vale do Aço</b><br>Últimos abastecimentos<br><br>02/10 11:27 · PVA-3H17 · R$ 1.856,90<br>01/10 15:02 · OQM-8J52 · R$ 1.589,75<br>30/09 10:48 · PVA-3H17 · R$ 2.311,50', t: '14:18' },
         { dir: 'in', html: 'não reconheço esse abastecimento de ontem', t: '14:20' },
-        { dir: 'out', html: 'Entendi: você não reconhece o pedido <b>#48118</b>, de 01/10 às 15:02. Vou passar para o Financeiro CP4 com todos os dados. Você não precisa explicar de novo.', t: '14:21' },
+        { dir: 'out', html: 'Qual abastecimento você não reconhece?', t: '14:20' },
+        { dir: 'in', html: '#48118 · R$ 1.589,75', t: '14:20' },
+        { dir: 'out', html: 'O que aconteceu?', t: '14:20' },
+        { dir: 'in', html: 'Não fui eu', t: '14:21' },
+        { dir: 'out', html: 'Certo. Vou te passar para o <b>Financeiro CP4</b> com os dados do pedido <b>#48118</b>. Você não precisa explicar de novo.', t: '14:21' },
         { dir: 'sys', html: 'Conversa na fila do Financeiro CP4 · posição 2', t: '14:21' },
       ],
     },
     {
       id: 'c3', empresa: 'TransLog Ipatinga', cnpj: '22.905.117/0001-08', contato: 'Sérgio Vilela', nivel: 'Financeiro', fone: '+55 31 9••••-7741',
-      ultima: 'quero fechar minha fatura agora', intent: 'cycle.close.request', status: 'Aguardando aprovador', risco: 'Alto', humano: 'Não', hora: '14:09',
+      ultima: 'quero fechar minha fatura agora', intent: 'cycle.close.request', motivo: 'Pedido de fechamento antecipado', status: 'Aguardando atendente', risco: 'Alto', humano: 'Na fila', hora: '14:09',
       conta: { disponivel: 4120.00, limite: 80000, fatura: 52310.60, venc: '09/10/2026', situacao: 'Em dia · limite 95% utilizado' },
-      resumo: 'Solicitou fechamento antecipado de R$ 52.310,60. PIN validado. Aguardando confirmação do aprovador na plataforma (expira em 6 min).',
+      resumo: 'Pede fechamento antecipado do ciclo 28/09–hoje: R$ 52.310,60 em 31 abastecimentos (taxa ainda estimada). Limite 95% utilizado.',
       abastecimentos: ['02/10 12:40 · HNQ-5E90 · R$ 3.214,00', '02/10 08:05 · HNQ-1B44 · R$ 2.870,35'],
       msgs: [
         { dir: 'in', html: 'quero fechar minha fatura agora', t: '14:06' },
-        { dir: 'out', html: 'Você está solicitando o <b>fechamento antecipado</b> do ciclo atual, com R$ 52.310,60 em abastecimentos.<br><br>Deseja continuar?', t: '14:06' },
-        { dir: 'in', html: 'Continuar', t: '14:07' },
-        { dir: 'out', html: 'Digite seu <b>PIN financeiro</b>.', t: '14:07' },
-        { dir: 'in', html: '••••••', t: '14:08' },
-        { dir: 'out', html: 'PIN conferido. Enviei o pedido de autorização para <b>Helena Vilela</b> (aprovadora). O link vale por 10 minutos.', t: '14:09' },
+        { dir: 'out', html: '<b>TransLog Ipatinga</b><br>Fatura atual: R$ 52.310,60 em abastecimentos.<br><br>O fechamento antecipado é feito pelo <b>Financeiro CP4</b>. Fechar não libera limite: o limite volta quando a fatura é paga.<br><br>Quer que eu passe seu pedido ao financeiro?', t: '14:06' },
+        { dir: 'in', html: 'Falar com o financeiro', t: '14:08' },
+        { dir: 'out', html: 'Certo. Vou te passar para o <b>Financeiro CP4</b> com os dados do seu ciclo. Você não precisa explicar de novo.', t: '14:09' },
+        { dir: 'sys', html: 'Conversa na fila do Financeiro CP4 · posição 1', t: '14:09' },
       ],
     },
     {
       id: 'c4', empresa: 'Transportes Aimorés', cnpj: '31.074.556/0001-71', contato: 'Paula Antunes', nivel: 'Financeiro', fone: '+55 27 9••••-6630',
-      ultima: 'meu pagamento não entrou', intent: 'support.dispute.open', status: 'Em atendimento', risco: 'Médio', humano: 'Camila Prates', hora: '13:52',
+      ultima: 'meu pagamento não entrou', intent: 'support.payment.issue', status: 'Em atendimento', risco: 'Médio', humano: 'Camila Prates', hora: '13:52',
       conta: { disponivel: 0, limite: 45000, fatura: 8930.10, venc: '09/10/2026', situacao: '1 fatura vencida há 2 dias' },
       resumo: 'Informa ter pago a fatura INV-20260925-Q1ZT em 30/09. Faturamento ainda pendente no sistema.',
       abastecimentos: ['29/09 19:12 · MTR-4C08 · R$ 1.940,20'],
@@ -145,15 +147,15 @@ const DATA = {
     },
     {
       id: 'c6', empresa: 'Expresso Mantiqueira', cnpj: '05.218.774/0001-63', contato: 'João Paulo Reis', nivel: 'Financeiro', fone: '+55 32 9••••-8054',
-      ultima: 'me manda o boleto', intent: 'invoice.payment.send', status: 'Resolvido pelo bot', risco: 'Baixo', humano: 'Não', hora: '13:10',
+      ultima: 'me manda a fatura', intent: 'invoice.document.send', status: 'Resolvido pelo bot', risco: 'Baixo', humano: 'Não', hora: '13:10',
       conta: { disponivel: 30115.75, limite: 50000, fatura: 6204.30, venc: '09/10/2026', situacao: 'Em dia' },
-      resumo: 'Recebeu o boleto da fatura INV-20260928-H6NV após validar o PIN.',
+      resumo: 'Recebeu o PDF da fatura INV-20260928-H6NV após validar o PIN.',
       abastecimentos: ['01/10 18:20 · LPX-9D33 · R$ 1.722,10'],
       msgs: [
-        { dir: 'in', html: 'me manda o boleto', t: '13:08' },
+        { dir: 'in', html: 'me manda a fatura', t: '13:08' },
         { dir: 'out', html: 'Digite seu <b>PIN financeiro</b>.', t: '13:08' },
         { dir: 'in', html: '••••••', t: '13:09' },
-        { dir: 'out', html: 'Boleto da fatura <b>INV-20260928-H6NV</b> · R$ 13.890,12 · vence em 05/10/2026', t: '13:10', doc: { name: 'boleto_INV-20260928-H6NV.pdf', meta: 'PDF · 84 KB' } },
+        { dir: 'out', html: 'Fatura <b>INV-20260928-H6NV</b> · R$ 13.890,12 · vence em 05/10/2026', t: '13:10', doc: { name: 'fatura_INV-20260928-H6NV.pdf', meta: 'PDF · 148 KB' } },
       ],
     },
     {
